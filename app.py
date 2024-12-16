@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 import mysql.connector
 import random
@@ -9,6 +9,9 @@ CORS(app)  # Enable CORS
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
+
+# Set the secret key to some random bytes. Keep this really secret!
+app.secret_key = 'supersecretkey'
 
 # Connect to MySQL
 conn = mysql.connector.connect(
@@ -54,12 +57,12 @@ def deal_initial_cards(game_state):
         player['hand'] = [game_state['white_cards'].pop() for _ in range(7)]
     game_state['black_card'] = game_state['black_cards'].pop()
 
-game_state = init_game_state()
-
 @app.route('/api/game-state', methods=['GET'])
 def get_game_state():
     try:
-        response = jsonify(game_state)
+        if 'game_state' not in session:
+            session['game_state'] = init_game_state()
+        response = jsonify(session['game_state'])
         logging.debug(f"Response: {response.get_data(as_text=True)}")
         return response
     except Exception as e:
@@ -69,12 +72,15 @@ def get_game_state():
 @app.route('/api/play-card', methods=['POST'])
 def play_card():
     try:
-        global game_state
+        if 'game_state' not in session:
+            return jsonify({'error': 'Game state not initialized'}), 400
+        game_state = session['game_state']
         data = request.json
         player_index = data['player_index']
         card_index = data['card_index']
         card = game_state['players'][player_index]['hand'].pop(card_index)
         game_state['played_cards'].append({'player_index': player_index, 'card': card})
+        session['game_state'] = game_state
         response = jsonify(game_state)
         logging.debug(f"Response: {response.get_data(as_text=True)}")
         return response
@@ -85,7 +91,9 @@ def play_card():
 @app.route('/api/pick-winner', methods=['POST'])
 def pick_winner():
     try:
-        global game_state
+        if 'game_state' not in session:
+            return jsonify({'error': 'Game state not initialized'}), 400
+        game_state = session['game_state']
         data = request.json
         winning_card_index = data['winning_card_index']
         winning_card = game_state['played_cards'][winning_card_index]
@@ -94,6 +102,7 @@ def pick_winner():
         game_state['played_cards'] = []
         game_state['dealer_index'] = (game_state['dealer_index'] + 1) % len(game_state['players'])
         deal_initial_cards(game_state)
+        session['game_state'] = game_state
         response = jsonify(game_state)
         logging.debug(f"Response: {response.get_data(as_text=True)}")
         return response
@@ -103,4 +112,3 @@ def pick_winner():
 
 if __name__ == '__main__':
     app.run(debug=True)
-    
